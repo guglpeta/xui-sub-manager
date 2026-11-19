@@ -13,7 +13,7 @@
 
 1. Клонируйте репозиторий на сервер (Ubuntu/Debian) и запустите установщик:
 ```bash
-git clone [https://github.com/nshimanovskiy/xui-sub-manager.git](https://github.com/nshimanovskiy/xui-sub-manager.git)
+git clone [https://github.com/guglpeta/xui-sub-manager.git](https://github.com/guglpeta/xui-sub-manager.git)
 cd xui-sub-manager
 sudo bash install.sh
 ```
