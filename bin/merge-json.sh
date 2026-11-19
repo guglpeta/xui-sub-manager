@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Склеивает свои прокси (local.json) с JSON-подпиской 3x-ui для каждого клиента из clients.txt
-# и генерирует для nginx заголовки подписки (название, описание, трафик/срок).
-# Запускается по cron и автоматически из clients.sh / add-proxy.sh.
+# Склеивает свои прокси (local.json), подписки провайдеров и (необязательно) JSON-подписку 3x-ui
+# для каждого клиента из clients.txt и генерирует для nginx заголовки подписки.
 set -uo pipefail
 
 DIR=/etc/merge-sub
@@ -14,7 +13,8 @@ OUTDIR=/var/www/subjson
 NGX=/etc/nginx/merge-sub/clients.conf
 
 # Значения по умолчанию (переопределяются в settings.conf)
-XUI="http://127.0.0.1:PORT_3XUI/jsonjsonjson"
+# Оставьте XUI="" если 3x-ui не используется
+XUI=""
 CURL_INSECURE=0
 TITLE=""; ANNOUNCE=""; INTERVAL=1; SUPPORT_URL=""; WEB_URL=""
 [ -f "$SETTINGS" ] && . "$SETTINGS"
@@ -29,15 +29,12 @@ if ! jq -e 'type=="array"' "$LOCAL" >/dev/null 2>&1; then
   exit 1
 fi
 
-# 3x-ui подставляет адрес сервера в конфиги из адреса запроса — говорим ему публичный домен,
-# иначе в VLESS окажется 127.0.0.1
 PUBLIC_HOST=${PUBLIC_HOST:-example.com}
 CURL=(curl -fsS --connect-timeout 5 --max-time 15 -H "Host: $PUBLIC_HOST" -H "X-Forwarded-Host: $PUBLIC_HOST")
 [ "$CURL_INSECURE" = 1 ] && CURL+=(-k)
 b64()   { printf '%s' "$1" | base64 -w0; }
-clean() { printf '%s' "$1" | tr -d '"$\\\r\n'; }   # чтобы не сломать конфиг nginx
+clean() { printf '%s' "$1" | tr -d '"$\\\r\n'; }
 
-# Один запуск за раз: cron + ручной запуск/меню не должны накладываться и ждать таймауты друг за другом
 exec 9>/run/merge-json.lock
 if ! flock -w 90 9; then
   echo "merge-json.sh уже выполняется больше 90 с — пропускаю этот запуск" >&2
@@ -53,9 +50,23 @@ while IFS='|' read -r SUBID NOTE CTITLE CANN CGROUPS _; do
   [[ -z "$SUBID" || "$SUBID" == \#* ]] && continue
   [[ "$SUBID" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "  ! пропускаю некорректный subId '$SUBID'" >&2; continue; }
 
-  if "${CURL[@]}" -D "$TMP/hdr" -o "$TMP/raw" "$XUI/$SUBID" 2>/dev/null \
-     && jq 'if type=="array" then . else [.] end' "$TMP/raw" > "$TMP/remote" 2>/dev/null; then
-    # Без групп — всё; с группами — только их прокси и (если отмечено) сервера 3x-ui
+  xui_ok=0
+  echo '[]' > "$TMP/remote"
+  : > "$TMP/hdr"
+
+  if [ -n "${XUI:-}" ]; then
+    if "${CURL[@]}" -D "$TMP/hdr" -o "$TMP/raw" "$XUI/$SUBID" 2>/dev/null \
+       && jq 'if type=="array" then . else [.] end' "$TMP/raw" > "$TMP/remote" 2>/dev/null; then
+      xui_ok=1
+    else
+      echo "  ! $SUBID: 3x-ui не отдал подписку, оставляю как было" >&2
+      fail=$((fail+1))
+    fi
+  else
+    xui_ok=1
+  fi
+
+  if [ "$xui_ok" = 1 ]; then
     jq -n --slurpfile L "$LOCAL" --slurpfile R "$TMP/remote" --slurpfile G "$GRPFILE" \
           --arg cg "${CGROUPS:-}" '
       ($cg | split(",") | map(select(length>0))) as $want
@@ -66,12 +77,13 @@ while IFS='|' read -r SUBID NOTE CTITLE CANN CGROUPS _; do
           | [ $L[0][] | select(.remarks as $r | $names | index($r)) ]
             + (if ($gs | any(.xui)) then $R[0] else [] end)
         end' > "$TMP/merged"
+
     IFS=, read -ra _gl <<< "${CGROUPS:-}"
     for g in "${_gl[@]+"${_gl[@]}"}"; do
       [ -n "$g" ] || continue
       jq -e --arg g "$g" 'has($g)' "$GRPFILE" >/dev/null || echo "  ! $SUBID: группы «$g» нет в groups.json" >&2
     done
-    [ "$(jq length "$TMP/merged")" -gt 0 ] || echo "  ! $SUBID: в его группах нет ни одного сервера — подписка пустая" >&2
+
     # freeze-sub: подписки провайдеров клиента
     if [ -x /usr/local/bin/freeze-sub.sh ] && [ -s /etc/merge-sub/client-subs.txt ]; then
       xsubs=$(awk -F"|" -v s="$SUBID" '$1==s{print $2}' /etc/merge-sub/client-subs.txt)
@@ -80,17 +92,18 @@ while IFS='|' read -r SUBID NOTE CTITLE CANN CGROUPS _; do
         jq -s 'add' "$TMP/merged" "$TMP/xsubs" > "$TMP/merged2" && mv "$TMP/merged2" "$TMP/merged"
       fi
     fi
+
+    [ "$(jq length "$TMP/merged")" -gt 0 ] || echo "  ! $SUBID: в подписке нет ни одного сервера — файл пустой" >&2
+
     # order-sub: порядок серверов клиента
     [ -x /usr/local/bin/order-sub.sh ] && /usr/local/bin/order-sub.sh --apply "$SUBID" "$TMP/merged" || true
     install -m 644 "$TMP/merged" "$OUTDIR/$SUBID.json"
-    grep -i '^subscription-userinfo:' "$TMP/hdr" | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' > "$CACHE/$SUBID" || true
+    if [ -s "$TMP/hdr" ]; then
+      grep -i '^subscription-userinfo:' "$TMP/hdr" | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' > "$CACHE/$SUBID" || true
+    fi
     ok=$((ok+1))
-  else
-    echo "  ! $SUBID: 3x-ui не отдал подписку, оставляю как было" >&2
-    fail=$((fail+1))
   fi
 
-  # Нет файла — нет и location: клиент получит обычную подписку 3x-ui
   [ -f "$OUTDIR/$SUBID.json" ] || continue
 
   t=${CTITLE:-$TITLE}; a=${CANN:-$ANNOUNCE}
@@ -110,7 +123,6 @@ while IFS='|' read -r SUBID NOTE CTITLE CANN CGROUPS _; do
   } >> "$TMP/ngx"
 done < "$CLIENTS"
 
-# Файлы клиентов, которых убрали из списка, удаляем
 ids=$(cut -d'|' -f1 "$CLIENTS" | tr -d ' \t\r' | grep -v '^$' || true)
 for f in "$OUTDIR"/*.json; do
   [ -e "$f" ] || continue
@@ -118,7 +130,6 @@ for f in "$OUTDIR"/*.json; do
   grep -qxF "$id" <<< "$ids" || rm -f "$f" "$CACHE/$id"
 done
 
-# Обновляем конфиг nginx только если он изменился
 if ! cmp -s "$TMP/ngx" "$NGX" 2>/dev/null; then
   [ -f "$NGX" ] && cp "$NGX" "$TMP/ngx.old"
   install -m 644 "$TMP/ngx" "$NGX"

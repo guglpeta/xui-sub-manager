@@ -7,8 +7,12 @@ DIR=/etc/merge-sub
 LOCAL=$DIR/local.json
 GRPFILE=$DIR/groups.json
 CLIENTS=$DIR/clients.txt
+SETTINGS=$DIR/settings.conf
 MERGE=/usr/local/bin/merge-json.sh
 PROXIES=/usr/local/bin/proxies.sh
+
+XUI=""
+[ -f "$SETTINGS" ] && . "$SETTINGS"
 
 mkdir -p "$DIR"
 [ -f "$LOCAL" ]  || echo '[]' > "$LOCAL"
@@ -30,14 +34,14 @@ show() {
   return 0
 }
 
-pick_group() {   # номер или имя -> имя
+pick_group() {
   local x=$1
   [[ "$x" =~ ^[0-9]+$ ]] && x=$(gnames | sed -n "${x}p")
   [ -n "$x" ] && jq -e --arg g "$x" 'has($g)' "$GRPFILE" >/dev/null && echo "$x" \
     || { echo "Нет такой группы" >&2; return 1; }
 }
 
-choose_proxies() {   # печатает JSON-массив выбранных названий
+choose_proxies() {
   local list ans
   list=$(proxies)
   [ -n "$list" ] || { echo "[]"; return; }
@@ -53,6 +57,7 @@ choose_proxies() {   # печатает JSON-массив выбранных н�
 }
 
 ask_xui() {
+  [ -n "${XUI:-}" ] || { echo false; return; }
   local def=$1 r
   read -rp "Включать сервера 3x-ui клиента? [$( [ "$def" = true ] && echo Y/n || echo y/N )]: " r
   case "${r,,}" in y*) echo true ;; n*) echo false ;; *) echo "$def" ;; esac
@@ -65,7 +70,11 @@ apply() { echo "Обновляю подписки..."; "$MERGE" || true; }
 while true; do
   echo; echo "=== Группы серверов ==="; show
   echo
-  echo "1) Создать  2) Изменить состав  3) Сервера 3x-ui вкл/выкл  4) Переименовать  5) Удалить"
+  if [ -n "${XUI:-}" ]; then
+    echo "1) Создать  2) Изменить состав  3) Сервера 3x-ui вкл/выкл  4) Переименовать  5) Удалить"
+  else
+    echo "1) Создать  2) Изменить состав  4) Переименовать  5) Удалить"
+  fi
   echo "6) Обновить подписки  7) Прокси (добавить/изменить)  0) Выход"
   read -rp "> " c
   case "$c" in
@@ -86,7 +95,6 @@ while true; do
        [ -n "$n" ] || continue
        jq -e --arg g "$n" 'has($g)' "$GRPFILE" >/dev/null && { echo "Такая уже есть"; continue; }
        save --arg o "$g" --arg n "$n" 'with_entries(if .key==$o then .key=$n else . end)'
-       # переименовываем и у клиентов
        [ -f "$CLIENTS" ] && O="$g" N="$n" awk -F'|' -v OFS='|' '
          { if (NF>=5) { m=split($5,a,","); s=""; for(i=1;i<=m;i++){ if(a[i]==ENVIRON["O"]) a[i]=ENVIRON["N"]; s=s (i>1?",":"") a[i] } $5=s } print }
        ' "$CLIENTS" > "$CLIENTS.tmp" && mv "$CLIENTS.tmp" "$CLIENTS"

@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
-# Управление клиентами склеенной JSON-подписки, их приписками, названием и описанием подписки.
-# Запуск: clients.sh                    — меню
-#         clients.sh list
-#         clients.sh add ID [приписка]
-#         clients.sh del ID
-#         clients.sh rename OLD NEW
-#         clients.sh note ID текст
-#         clients.sh update
+# Управление клиентами JSON-подписки, их приписками, названием и описанием подписки.
 set -euo pipefail
 
 DIR=/etc/merge-sub
@@ -15,7 +8,7 @@ GRPFILE=$DIR/groups.json
 SETTINGS=$DIR/settings.conf
 MERGE=/usr/local/bin/merge-json.sh
 
-XUI="http://127.0.0.1:PORT_3XUI/jsonjsonjson"
+XUI=""
 CURL_INSECURE=0
 TITLE=""; ANNOUNCE=""; INTERVAL=1; SUPPORT_URL=""; WEB_URL=""
 mkdir -p "$DIR"; touch "$CLIENTS"
@@ -33,17 +26,18 @@ valid()  { [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Недопустимый su
 ids()    { cut -d'|' -f1 "$CLIENTS" | grep -v '^\s*$' || true; }
 exists() { ids | grep -qxF "$1"; }
 field()  { ID="$1" N="$2" awk -F'|' '$1==ENVIRON["ID"]{print $ENVIRON["N"]}' "$CLIENTS"; }
-setfield() {   # setfield ID N значение
+setfield() {
   ID="$1" N="$2" VAL="$(sanitize "$3")" awk -F'|' -v OFS='|' '
     $1==ENVIRON["ID"] { n=ENVIRON["N"]+0; while (NF<5) $(NF+1)=""; $n=ENVIRON["VAL"] } { print }
   ' "$CLIENTS" > "$CLIENTS.tmp" && mv "$CLIENTS.tmp" "$CLIENTS"
 }
-pick() {       # номер или subId -> subId
+pick() {
   local x=$1
   [[ "$x" =~ ^[0-9]+$ ]] && x=$(ids | sed -n "${x}p")
   [ -n "$x" ] && exists "$x" && echo "$x" || { echo "Нет такого клиента" >&2; return 1; }
 }
 check_xui() {
+  [ -n "${XUI:-}" ] || return 0
   local k=(); [ "$CURL_INSECURE" = 1 ] && k=(-k)
   curl -fsS "${k[@]}" --max-time 10 "$XUI/$1" -o /dev/null 2>/dev/null \
     || echo "  Внимание: 3x-ui не отдаёт подписку для '$1' — проверь subId в панели."
@@ -69,6 +63,7 @@ do_list() {
 
 show_settings() {
   echo "Общие: название «${TITLE:-—}», описание «${ANNOUNCE:-—}», обновление каждые ${INTERVAL} ч"
+  echo "       3x-ui: ${XUI:-отключен (standalone)}"
   [ -n "$SUPPORT_URL" ] && echo "       поддержка: $SUPPORT_URL"
   [ -n "$WEB_URL" ]     && echo "       сайт: $WEB_URL"
   return 0
@@ -85,7 +80,7 @@ do_del() {
   local id=$1
   exists "$id" || { echo "'$id' нет в списке"; return 1; }
   ID="$id" awk -F'|' '$1!=ENVIRON["ID"]' "$CLIENTS" > "$CLIENTS.tmp" && mv "$CLIENTS.tmp" "$CLIENTS"
-  echo "Удалён: $id (вернётся на обычную подписку 3x-ui)"
+  echo "Удалён: $id"
 }
 
 do_rename() {
@@ -128,6 +123,8 @@ set_groups() {
 edit_settings() {
   local v
   echo "Пустой ввод — оставить как есть, «-» — очистить."
+  read -rep "URL JSON-подписки 3x-ui (например http://127.0.0.1:20967/jsonjsonjson) [${XUI:-нет}]: " v
+  [ "$v" = "-" ] && XUI="" || XUI=${v:-$XUI}
   read -rep "Название подписки [$TITLE]: " v;              [ "$v" = "-" ] && TITLE="" || { [ -n "$v" ] && warn_title "$v"; TITLE=${v:-$TITLE}; }
   read -rep "Описание (до 200 символов) [$ANNOUNCE]: " v;  [ "$v" = "-" ] && ANNOUNCE="" || ANNOUNCE=${v:-$ANNOUNCE}
   read -rep "Обновление, часов [$INTERVAL]: " v
@@ -154,7 +151,7 @@ while true; do
   echo
   echo "1) Добавить        2) Удалить            3) Изменить subId"
   echo "4) Приписка        5) Название/описание клиента"
-  echo "6) Общие название, описание, ссылки      7) Группы клиента"
+  echo "6) Общие настройки (3x-ui, название, ссылки)   7) Группы клиента"
   echo "8) Обновить подписки   0) Выход"
   read -rp "> " c
   case "$c" in
