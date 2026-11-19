@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-[ "$EUID" -eq 0 ] || { echo "Запустите скрипт от root (sudo bash install.sh)"; exit 1; }
+[ "$EUID" -eq 0 ] || { echo "Р—Р°РїСѓСЃС‚РёС‚Рµ СЃРєСЂРёРїС‚ РѕС‚ root (sudo bash install.sh)"; exit 1; }
 
-read -rp "Ваш домен (например, sub.example.com): " DOMAIN
+read -rp "Р’Р°С€ РґРѕРјРµРЅ (РЅР°РїСЂРёРјРµСЂ, sub.example.com): " DOMAIN
 DOMAIN=$(printf '%s' "$DOMAIN" | tr -d '[:space:]')
-[ -n "$DOMAIN" ] || { echo "Домен не может быть пустым."; exit 1; }
+[ -n "$DOMAIN" ] || { echo "Р”РѕРјРµРЅ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј."; exit 1; }
 
-read -rp "Локальный порт JSON-подписки 3x-ui (Enter — если 3x-ui не используется): " XUI_PORT
+read -rp "Р›РѕРєР°Р»СЊРЅС‹Р№ РїРѕСЂС‚ JSON-РїРѕРґРїРёСЃРєРё 3x-ui (Enter вЂ” РµСЃР»Рё 3x-ui РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ): " XUI_PORT
 XUI_PORT=$(printf '%s' "$XUI_PORT" | tr -d '[:space:]')
 
-read -rp "Порт для раздачи подписок [443]: " SUB_PORT
+read -rp "РџРѕСЂС‚ РґР»СЏ СЂР°Р·РґР°С‡Рё РїРѕРґРїРёСЃРѕРє [443]: " SUB_PORT
 SUB_PORT=${SUB_PORT:-443}
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y jq python3 curl cron util-linux nginx certbot python3-certbot-nginx
+NEED_PKGS=()
+for pkg in jq python3 curl cron util-linux nginx certbot python3-certbot-nginx; do
+  dpkg -s "$pkg" >/dev/null 2>&1 || NEED_PKGS+=("$pkg")
+done
+if [ ${#NEED_PKGS[@]} -gt 0 ]; then
+  apt-get -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update || true
+  apt-get -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y "${NEED_PKGS[@]}"
+fi
 
 systemctl enable --now cron
 systemctl enable --now nginx
@@ -46,11 +52,11 @@ SUPPORT_URL=""
 WEB_URL=""
 EOF
 
-# --- Автоматическая настройка Nginx ---
+# --- РђРІС‚РѕРјР°С‚РёС‡РµСЃРєР°СЏ РЅР°СЃС‚СЂРѕР№РєР° Nginx ---
 EXISTING_CONF=$(grep -rlE "server_name[[:space:]]+([^;]*[[:space:]])?${DOMAIN}([[:space:]]|;)" /etc/nginx/sites-enabled/ 2>/dev/null | head -n1 || true)
 
 if [ -n "$EXISTING_CONF" ]; then
-  echo "Найден существующий конфиг Nginx для $DOMAIN: $EXISTING_CONF"
+  echo "РќР°Р№РґРµРЅ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ РєРѕРЅС„РёРі Nginx РґР»СЏ $DOMAIN: $EXISTING_CONF"
   if ! grep -q 'merge-sub/\*\.conf' "$EXISTING_CONF"; then
     cp "$EXISTING_CONF" "${EXISTING_CONF}.bak-merge-sub"
     XUI_FALLBACK=""
@@ -65,9 +71,9 @@ if [ -n "$EXISTING_CONF" ]; then
         done=1
       }
     ' "${EXISTING_CONF}.bak-merge-sub" > "$EXISTING_CONF"
-    echo "Директивы добавлены в $EXISTING_CONF (резервная копия: ${EXISTING_CONF}.bak-merge-sub)."
+    echo "Р”РёСЂРµРєС‚РёРІС‹ РґРѕР±Р°РІР»РµРЅС‹ РІ $EXISTING_CONF (СЂРµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ: ${EXISTING_CONF}.bak-merge-sub)."
   else
-    echo "Подключение merge-sub уже присутствует в $EXISTING_CONF."
+    echo "РџРѕРґРєР»СЋС‡РµРЅРёРµ merge-sub СѓР¶Рµ РїСЂРёСЃСѓС‚СЃС‚РІСѓРµС‚ РІ $EXISTING_CONF."
   fi
 else
   NGX_AVAIL="/etc/nginx/sites-available/merge-sub-${DOMAIN}.conf"
@@ -96,10 +102,10 @@ EOF
   nginx -t && systemctl reload nginx
 
   echo
-  read -rp "Выпустить бесплатный SSL-сертификат Let's Encrypt через Certbot для $DOMAIN? [Y/n]: " DO_SSL
-  if [[ ! "${DO_SSL,,}" =~ ^(n|н)$ ]]; then
+  read -rp "Р’С‹РїСѓСЃС‚РёС‚СЊ Р±РµСЃРїР»Р°С‚РЅС‹Р№ SSL-СЃРµСЂС‚РёС„РёРєР°С‚ Let's Encrypt С‡РµСЂРµР· Certbot РґР»СЏ $DOMAIN? [Y/n]: " DO_SSL
+  if [[ ! "${DO_SSL,,}" =~ ^(n|РЅ)$ ]]; then
     certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect || {
-      echo "⚠ Certbot не смог автоматически выпустить сертификат (проверь DNS A-запись домена и доступность 80 порта)."
+      echo "вљ  Certbot РЅРµ СЃРјРѕРі Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РІС‹РїСѓСЃС‚РёС‚СЊ СЃРµСЂС‚РёС„РёРєР°С‚ (РїСЂРѕРІРµСЂСЊ DNS A-Р·Р°РїРёСЃСЊ РґРѕРјРµРЅР° Рё РґРѕСЃС‚СѓРїРЅРѕСЃС‚СЊ 80 РїРѕСЂС‚Р°)."
     }
     if [ "$SUB_PORT" != "443" ] && grep -q "listen 443 ssl" "$NGX_AVAIL"; then
       sed -i "s/listen 443 ssl/listen ${SUB_PORT} ssl/" "$NGX_AVAIL"
@@ -109,15 +115,15 @@ fi
 
 if nginx -t; then
   systemctl reload nginx
-  echo "Nginx успешно настроен и перезагружен."
+  echo "Nginx СѓСЃРїРµС€РЅРѕ РЅР°СЃС‚СЂРѕРµРЅ Рё РїРµСЂРµР·Р°РіСЂСѓР¶РµРЅ."
 else
-  echo "⚠ Ошибка проверки конфигурации Nginx (nginx -t). Проверьте конфиг вручную."
+  echo "вљ  РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РєРѕРЅС„РёРіСѓСЂР°С†РёРё Nginx (nginx -t). РџСЂРѕРІРµСЂСЊС‚Рµ РєРѕРЅС„РёРі РІСЂСѓС‡РЅСѓСЋ."
 fi
 
-# --- Настройка Cron ---
+# --- РќР°СЃС‚СЂРѕР№РєР° Cron ---
 (crontab -l 2>/dev/null | grep -vE 'merge-json\.sh|freeze-sub\.sh' || true; \
  echo "*/10 * * * * /usr/local/bin/freeze-sub.sh --refresh >/dev/null 2>&1"; \
  echo "*/10 * * * * /usr/local/bin/merge-json.sh >/dev/null 2>&1") | crontab -
 
 echo
-echo "Установка завершена! Запустите 'sub.sh' для управления подписками."
+echo "РЈСЃС‚Р°РЅРѕРІРєР° Р·Р°РІРµСЂС€РµРЅР°! Р—Р°РїСѓСЃС‚РёС‚Рµ 'sub.sh' РґР»СЏ СѓРїСЂР°РІР»РµРЅРёСЏ РїРѕРґРїРёСЃРєР°РјРё."
