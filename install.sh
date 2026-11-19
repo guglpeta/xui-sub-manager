@@ -53,7 +53,7 @@ WEB_URL=""
 EOF
 
 # --- РђРІС‚РѕРјР°С‚РёС‡РµСЃРєР°СЏ РЅР°СЃС‚СЂРѕР№РєР° Nginx ---
-EXISTING_CONF=$(grep -rlE "server_name[[:space:]]+([^;]*[[:space:]])?${DOMAIN}([[:space:]]|;)" /etc/nginx/sites-enabled/ 2>/dev/null | head -n1 || true)
+EXISTING_CONF=$(grep -rlE "server_name[[:space:]]+([^;]*[[:space:]])?${DOMAIN}([[:space:]]|;)" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v "merge-sub-${DOMAIN}\.conf" | head -n1 || true)
 
 if [ -n "$EXISTING_CONF" ]; then
   echo "РќР°Р№РґРµРЅ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ РєРѕРЅС„РёРі Nginx РґР»СЏ $DOMAIN: $EXISTING_CONF"
