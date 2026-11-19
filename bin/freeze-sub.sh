@@ -147,9 +147,9 @@ check_freeze() {
 # --- nginx: пересобрать frozen.conf (по location на каждую подписку, с заголовками) ---
 gen_nginx() {
   local tmp old tok name url date n desc hw mode root sub
-  [ "${FROZEN_NO_NGINX:-0}" != 1 ] && ! grep -rqs 'merge-sub/\*\.conf' /etc/nginx/sites-enabled/ && {
-    echo "⚠ В конфиге nginx на PORT_SUB нет строки: include /etc/nginx/merge-sub/*.conf;"
-    echo "  Добавь её в блок server после строк с сертификатом и запусти скрипт снова."
+  [ "${FROZEN_NO_NGINX:-0}" != 1 ] && ! grep -rqs 'merge-sub/' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ /etc/nginx/nginx.conf 2>/dev/null && {
+    echo "⚠ В конфиге nginx не найдена строка: include /etc/nginx/merge-sub/*.conf;"
+    echo "  Добавь её в блок server и перезагрузи nginx."
     return 1; }
   root=$(dirname "$DIR"); sub=$(basename "$DIR")
   mkdir -p "$(dirname "$NGX")"
